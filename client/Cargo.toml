@@ -1,0 +1,17 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.65"
+chrono = "0.4.22"
+clap = { version = "4.0.15", features = ["derive"] }
+serde = "1.0.145"
+serde_json = "1.0.86"
+tokio = { version = "1.21.2", features = ["time", "io-std", "io-util", "net", "macros", "rt-multi-thread"] }
+messages = { path = "../messages" }
+io_utils = { path = "../io_utils" }
+uuid = { version = "1.2.1", features = ["v4"] }

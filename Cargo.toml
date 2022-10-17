@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+  "server",
+  "client",
+  "messages",
+  "io_utils"
+]
+
