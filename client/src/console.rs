@@ -73,7 +73,7 @@ impl Console {
           contents,
           received_at,
         } => {
-          println!("{}: {}", username, contents);
+          println!("    [{}] {username}: {contents}", format_date(*received_at));
         }
         Message::FromClient {
           message_id,
@@ -84,11 +84,17 @@ impl Console {
           read,
         } => {
           let check = if *read { "✓" } else { "" };
-          println!("        {}{}: {}", check, username, contents);
+          println!("[{}] {check}{username}: {contents}", format_date(*sent_at));
         }
       }
     }
   }
+}
+
+fn format_date(date: DateTime<Utc>) -> String {
+  (date - chrono::Duration::hours(3))
+    .format("%H:%M")
+    .to_string()
 }
 
 fn clear_console() {

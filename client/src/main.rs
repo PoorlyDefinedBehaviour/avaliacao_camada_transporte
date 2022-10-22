@@ -141,7 +141,6 @@ async fn main() -> Result<()> {
         console.message_sent(message);
       }
       _ = console_interval.tick() => console.show_conversation()
-
     }
   }
 }
