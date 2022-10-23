@@ -134,11 +134,9 @@ impl ChatClient {
   }
 
   async fn recv(&mut self) -> Result<Option<MessageFromPeer>> {
-    self.server_stream.readable().await.unwrap();
+    self.server_stream.readable().await?;
 
-    let message = io_utils::read_message(&mut self.server_stream)
-      .await
-      .unwrap();
+    let message = io_utils::read_message(&mut self.server_stream).await?;
 
     match message.r#type {
       messages::MessageType::JoinRoom => unreachable!(),

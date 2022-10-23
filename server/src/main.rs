@@ -45,19 +45,21 @@ impl ChatManager {
         contents: body.contents,
       })?;
 
-      futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
-        if *socket_addr != sender_addr {
-          let mut writer = BufWriter::new(write_half);
-          writer
-            .write_u8(messages::MessageType::ChatMessage.as_u8())
-            .await
-            .unwrap();
-          writer.write_u32(body.len() as u32).await.unwrap();
-          writer.write_all(&body).await.unwrap();
-          writer.flush().await.unwrap();
-        }
-      }))
-      .await;
+      let _results: Vec<std::io::Result<()>> =
+        futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
+          if *socket_addr != sender_addr {
+            let mut writer = BufWriter::new(write_half);
+            writer
+              .write_u8(messages::MessageType::ChatMessage.as_u8())
+              .await?;
+            writer.write_u32(body.len() as u32).await?;
+            writer.write_all(&body).await?;
+            writer.flush().await?;
+          }
+
+          Ok(())
+        }))
+        .await;
     }
 
     Ok(())
@@ -74,19 +76,21 @@ impl ChatManager {
         message_id: message.message_id,
       })?;
 
-      futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
-        if *socket_addr != sender_addr {
-          let mut writer = BufWriter::new(write_half);
-          writer
-            .write_u8(messages::MessageType::MessageRead.as_u8())
-            .await
-            .unwrap();
-          writer.write_u32(body.len() as u32).await.unwrap();
-          writer.write_all(&body).await.unwrap();
-          writer.flush().await.unwrap();
-        }
-      }))
-      .await;
+      let _results: Vec<std::io::Result<()>> =
+        futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
+          if *socket_addr != sender_addr {
+            let mut writer = BufWriter::new(write_half);
+            writer
+              .write_u8(messages::MessageType::MessageRead.as_u8())
+              .await?;
+            writer.write_u32(body.len() as u32).await?;
+            writer.write_all(&body).await?;
+            writer.flush().await?;
+          }
+
+          Ok(())
+        }))
+        .await;
     }
 
     Ok(())
@@ -103,19 +107,21 @@ impl ChatManager {
         message_id: message.message_id,
       })?;
 
-      futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
-        if *socket_addr != sender_addr {
-          let mut writer = BufWriter::new(write_half);
-          writer
-            .write_u8(messages::MessageType::MessageReceived.as_u8())
-            .await
-            .unwrap();
-          writer.write_u32(body.len() as u32).await.unwrap();
-          writer.write_all(&body).await.unwrap();
-          writer.flush().await.unwrap();
-        }
-      }))
-      .await;
+      let _results: Vec<std::io::Result<()>> =
+        futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
+          if *socket_addr != sender_addr {
+            let mut writer = BufWriter::new(write_half);
+            writer
+              .write_u8(messages::MessageType::MessageReceived.as_u8())
+              .await?;
+            writer.write_u32(body.len() as u32).await?;
+            writer.write_all(&body).await?;
+            writer.flush().await?;
+          }
+
+          Ok(())
+        }))
+        .await;
     }
 
     Ok(())
@@ -125,7 +131,7 @@ impl ChatManager {
 #[tokio::main]
 async fn main() -> Result<()> {
   tracing_subscriber::fmt::init();
-  
+
   let chat_manager = ChatManager::new();
 
   let listener = TcpListener::bind("0.0.0.0:8080").await?;
