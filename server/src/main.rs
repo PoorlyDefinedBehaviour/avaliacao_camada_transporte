@@ -124,6 +124,8 @@ impl ChatManager {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+  tracing_subscriber::fmt::init();
+  
   let chat_manager = ChatManager::new();
 
   let listener = TcpListener::bind("0.0.0.0:8080").await?;

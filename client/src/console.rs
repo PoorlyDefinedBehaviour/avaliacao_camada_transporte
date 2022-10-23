@@ -35,10 +35,10 @@ impl Console {
     }
   }
 
-  pub async fn read_input(&mut self) -> String {
+  pub async fn read_input(&mut self) -> std::io::Result<String> {
     let mut buffer = [0; 4096];
-    let _bytes_read = self.stdin.read(&mut buffer).await.unwrap();
-    String::from_utf8_lossy(&buffer).to_string()
+    let _bytes_read = self.stdin.read(&mut buffer).await?;
+    Ok(String::from_utf8_lossy(&buffer).to_string())
   }
 
   pub fn message_received(&mut self, message: PeerChatMessage) {

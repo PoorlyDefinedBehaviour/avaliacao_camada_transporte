@@ -14,3 +14,4 @@ messages = { path = "../messages" }
 io_utils = { path = "../io_utils" }
 futures = "0.3.24"
 tracing = "0.1.37"
+tracing-subscriber = "0.3.16"

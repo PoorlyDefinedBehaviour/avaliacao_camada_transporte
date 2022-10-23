@@ -187,6 +187,8 @@ impl ChatClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+  tracing_subscriber::fmt::init();
+
   let mut client = ChatClient::new(Config::parse()).await?;
 
   let mut console = Console::new();
@@ -218,25 +220,31 @@ async fn main() -> Result<()> {
         }
       }
       input = console.read_input() => {
-        let message_id = client.next_message_id();
+        match input {
+          Err(err) => {
+            println!("unable to read input. error={:?}",err);
+          }
+          Ok(input) => {
+            let message_id = client.next_message_id();
 
-        let message = MessageFromClient {
-          username: client.username()?,
-          message_id,
-          contents: input,
-          sent_at: Utc::now()
-        };
+            let message = MessageFromClient {
+              username: client.username()?,
+              message_id,
+              contents: input,
+              sent_at: Utc::now()
+            };
 
-        client.send(messages::MessageType::ChatMessage, messages::client_to_server::ChatMessage {
-          message_id,
-          username: message.username.clone(),
-          contents: message.contents.clone(),
-          room_id: client.room().to_owned()
-        })
-        .await?;
+            client.send(messages::MessageType::ChatMessage, messages::client_to_server::ChatMessage {
+              message_id,
+              username: message.username.clone(),
+              contents: message.contents.clone(),
+              room_id: client.room().to_owned()
+            })
+            .await?;
 
-        console.message_sent(message);
-
+            console.message_sent(message);
+          }
+        }
       }
     }
   }
