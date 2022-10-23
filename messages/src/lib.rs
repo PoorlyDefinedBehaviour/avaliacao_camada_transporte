@@ -6,6 +6,8 @@ pub mod server_to_client;
 pub enum MessageType {
   JoinRoom,
   ChatMessage,
+  MessageRead,
+  MessageReceived,
 }
 
 impl MessageType {
@@ -13,6 +15,8 @@ impl MessageType {
     match self {
       MessageType::JoinRoom => 0,
       MessageType::ChatMessage => 1,
+      MessageType::MessageRead => 2,
+      MessageType::MessageReceived => 3,
     }
   }
 }
@@ -22,6 +26,8 @@ impl From<u8> for MessageType {
     match input {
       0 => MessageType::JoinRoom,
       1 => MessageType::ChatMessage,
+      2 => MessageType::MessageRead,
+      3 => MessageType::MessageRead,
       _ => unreachable!(),
     }
   }

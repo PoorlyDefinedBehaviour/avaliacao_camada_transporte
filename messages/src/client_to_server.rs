@@ -7,7 +7,7 @@ pub struct JoinRoomMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
-  pub message_id: String,
+  pub message_id: u64,
   pub username: String,
   pub room_id: String,
   pub contents: String,
@@ -15,5 +15,12 @@ pub struct ChatMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageReadMessage {
-  pub message_id: String,
+  pub message_id: u64,
+  pub room_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessageReceivedMessage {
+  pub message_id: u64,
+  pub room_id: String,
 }

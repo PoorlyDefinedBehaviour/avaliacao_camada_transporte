@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
 use tokio::io::AsyncReadExt;
 
-use crate::{MessageFromClient, MessageFromPeer};
+use crate::{MessageFromClient, PeerChatMessage};
 
 pub struct Console {
   stdin: tokio::io::Stdin,
@@ -13,14 +13,13 @@ pub struct Console {
 #[derive(Debug)]
 enum Message {
   FromPeer {
-    message_id: String,
     username: String,
     contents: String,
     received_at: DateTime<Utc>,
   },
   FromClient {
     username: String,
-    message_id: String,
+    message_id: u64,
     contents: String,
     sent_at: DateTime<Utc>,
     delivered: bool,
@@ -32,7 +31,7 @@ impl Console {
   pub fn new() -> Self {
     Self {
       stdin: tokio::io::stdin(),
-      messages: MaxLengthVec::new(5),
+      messages: MaxLengthVec::new(50),
     }
   }
 
@@ -42,13 +41,14 @@ impl Console {
     String::from_utf8_lossy(&buffer).to_string()
   }
 
-  pub fn message_received(&mut self, message: MessageFromPeer) {
+  pub fn message_received(&mut self, message: PeerChatMessage) {
     self.messages.push(Message::FromPeer {
-      message_id: message.message_id,
       username: message.username,
       contents: message.contents,
       received_at: message.received_at,
-    })
+    });
+
+    self.show_conversation();
   }
 
   pub fn message_sent(&mut self, message: MessageFromClient) {
@@ -59,7 +59,41 @@ impl Console {
       sent_at: message.sent_at,
       delivered: false,
       read: false,
-    })
+    });
+
+    self.show_conversation();
+  }
+
+  pub fn message_read(&mut self, read_message_id: u64) {
+    for message in self.messages.items.iter_mut() {
+      if let Message::FromClient {
+        message_id, read, ..
+      } = message
+      {
+        if *message_id <= read_message_id {
+          *read = true;
+        }
+      }
+    }
+
+    self.show_conversation();
+  }
+
+  pub fn message_delivered(&mut self, delivered_message_id: u64) {
+    for message in self.messages.items.iter_mut() {
+      if let Message::FromClient {
+        message_id,
+        delivered,
+        ..
+      } = message
+      {
+        if *message_id <= delivered_message_id {
+          *delivered = true;
+        }
+      }
+    }
+
+    self.show_conversation();
   }
 
   pub fn show_conversation(&self) {
@@ -68,23 +102,29 @@ impl Console {
     for message in self.messages.items.iter() {
       match message {
         Message::FromPeer {
-          message_id,
           username,
           contents,
           received_at,
+          ..
         } => {
           println!("    [{}] {username}: {contents}", format_date(*received_at));
         }
         Message::FromClient {
-          message_id,
           username,
           contents,
           sent_at,
           delivered,
           read,
+          ..
         } => {
-          let check = if *read { "✓" } else { "" };
-          println!("[{}] {check}{username}: {contents}", format_date(*sent_at));
+          let check = if *read {
+            "✓✓"
+          } else if *delivered {
+            "✓"
+          } else {
+            ""
+          };
+          println!("[{}] {check} {username}: {contents}", format_date(*sent_at));
         }
       }
     }
@@ -93,7 +133,7 @@ impl Console {
 
 fn format_date(date: DateTime<Utc>) -> String {
   (date - chrono::Duration::hours(3))
-    .format("%H:%M")
+    .format("%H:%M:%S")
     .to_string()
 }
 

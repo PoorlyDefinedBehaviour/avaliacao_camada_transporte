@@ -1,13 +1,10 @@
-use std::{
-  collections::{HashMap, HashSet},
-  net::SocketAddr,
-  sync::Arc,
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use tracing::error;
 
 use anyhow::Result;
 
 use tokio::{
-  io::{AsyncReadExt, AsyncWriteExt, BufWriter},
+  io::{AsyncWriteExt, BufWriter},
   net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
   sync::Mutex,
 };
@@ -65,6 +62,64 @@ impl ChatManager {
 
     Ok(())
   }
+
+  async fn message_read(
+    &self,
+    sender_addr: SocketAddr,
+    message: messages::client_to_server::MessageReadMessage,
+  ) -> Result<()> {
+    let mut rooms = self.rooms.lock().await;
+    if let Some(clients) = rooms.get_mut(&message.room_id) {
+      let body = serde_json::to_vec(&messages::server_to_client::MessageReadMessage {
+        message_id: message.message_id,
+      })?;
+
+      futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
+        if *socket_addr != sender_addr {
+          let mut writer = BufWriter::new(write_half);
+          writer
+            .write_u8(messages::MessageType::MessageRead.as_u8())
+            .await
+            .unwrap();
+          writer.write_u32(body.len() as u32).await.unwrap();
+          writer.write_all(&body).await.unwrap();
+          writer.flush().await.unwrap();
+        }
+      }))
+      .await;
+    }
+
+    Ok(())
+  }
+
+  async fn message_delivered(
+    &self,
+    sender_addr: SocketAddr,
+    message: messages::client_to_server::MessageReceivedMessage,
+  ) -> Result<()> {
+    let mut rooms = self.rooms.lock().await;
+    if let Some(clients) = rooms.get_mut(&message.room_id) {
+      let body = serde_json::to_vec(&messages::server_to_client::MessageDeliveredMessage {
+        message_id: message.message_id,
+      })?;
+
+      futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
+        if *socket_addr != sender_addr {
+          let mut writer = BufWriter::new(write_half);
+          writer
+            .write_u8(messages::MessageType::MessageReceived.as_u8())
+            .await
+            .unwrap();
+          writer.write_u32(body.len() as u32).await.unwrap();
+          writer.write_all(&body).await.unwrap();
+          writer.flush().await.unwrap();
+        }
+      }))
+      .await;
+    }
+
+    Ok(())
+  }
 }
 
 #[tokio::main]
@@ -90,35 +145,81 @@ async fn handle_connection(
 ) {
   let (mut read_half, write_half) = socket.into_split();
 
-  read_half.readable().await.unwrap();
+  if let Err(err) = read_half.readable().await {
+    error!("socket is not readable. error={:?}", err);
+  }
 
-  let message = io_utils::read_message(&mut read_half).await.unwrap();
+  let message = match io_utils::read_message(&mut read_half).await {
+    Err(err) => {
+      error!("unable to read first message from socket. error={:?}", err);
+      return;
+    }
+    Ok(v) => v,
+  };
 
   assert_eq!(message.r#type, messages::MessageType::JoinRoom);
 
   let body =
-    serde_json::from_slice::<messages::client_to_server::JoinRoomMessage>(&message.body).unwrap();
+    match serde_json::from_slice::<messages::client_to_server::JoinRoomMessage>(&message.body) {
+      Err(err) => {
+        error!(
+          "unexpected join room message, this is a bug. error={:?}",
+          err
+        );
+        return;
+      }
+      Ok(v) => v,
+    };
 
   chat_manager.join_room(write_half, socket_addr, body).await;
 
   loop {
-    read_half.readable().await.unwrap();
+    if let Err(err) = read_half.readable().await {
+      error!("socket is not readable. error={:?}", err);
+    }
 
-    let message = io_utils::read_message(&mut read_half).await.unwrap();
-
-    match message.r#type {
-      messages::MessageType::JoinRoom => {
-        panic!("JoinRoom message received twice, this is a bug.");
+    let message = match io_utils::read_message(&mut read_half).await {
+      Err(err) => {
+        error!("unexpected message, this is a bug. error={:?}", err);
+        return;
       }
-      messages::MessageType::ChatMessage => {
-        let body =
-          serde_json::from_slice::<messages::client_to_server::ChatMessage>(&message.body).unwrap();
+      Ok(v) => v,
+    };
 
-        chat_manager
-          .message_received(socket_addr, body)
-          .await
-          .unwrap();
-      }
+    if let Err(err) = handle_message(&chat_manager, socket_addr, message).await {
+      error!("unexpected error handling meessage. error={:?}", err);
     }
   }
+}
+
+async fn handle_message(
+  chat_manager: &ChatManager,
+  socket_addr: SocketAddr,
+  message: messages::Message,
+) -> Result<()> {
+  match message.r#type {
+    messages::MessageType::JoinRoom => {
+      panic!("JoinRoom message received twice, this is a bug.");
+    }
+    messages::MessageType::MessageReceived => {
+      let body = serde_json::from_slice::<messages::client_to_server::MessageReceivedMessage>(
+        &message.body,
+      )?;
+
+      chat_manager.message_delivered(socket_addr, body).await?;
+    }
+    messages::MessageType::MessageRead => {
+      let body =
+        serde_json::from_slice::<messages::client_to_server::MessageReadMessage>(&message.body)?;
+
+      chat_manager.message_read(socket_addr, body).await?;
+    }
+    messages::MessageType::ChatMessage => {
+      let body = serde_json::from_slice::<messages::client_to_server::ChatMessage>(&message.body)?;
+
+      chat_manager.message_received(socket_addr, body).await?;
+    }
+  }
+
+  Ok(())
 }
