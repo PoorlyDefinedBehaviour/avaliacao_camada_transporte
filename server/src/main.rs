@@ -126,7 +126,7 @@ impl ChatManager {
 async fn main() -> Result<()> {
   let chat_manager = ChatManager::new();
 
-  let listener = TcpListener::bind("127.0.0.1:8080").await?;
+  let listener = TcpListener::bind("0.0.0.0:8080").await?;
 
   loop {
     let (socket, socket_addr) = listener.accept().await?;

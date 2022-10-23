@@ -10,7 +10,7 @@ use tokio::net::{TcpSocket, TcpStream};
 mod console;
 
 // TODO: duplicated in server/main.rs
-const SERVER_ADDR: &str = "127.0.0.1:8080";
+const SERVER_ADDR: &str = "18.228.22.102:8080";
 
 #[derive(Debug, Clone, Parser)]
 #[command(author, version, about, long_about = None)]
