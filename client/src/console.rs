@@ -1,9 +1,8 @@
-use std::collections::VecDeque;
-
 use chrono::{DateTime, Utc};
+use std::collections::VecDeque;
 use tokio::io::AsyncReadExt;
 
-use crate::{MessageFromClient, PeerChatMessage};
+use crate::MessageFromClient;
 
 pub struct Console {
   stdin: tokio::io::Stdin,
@@ -36,16 +35,16 @@ impl Console {
   }
 
   pub async fn read_input(&mut self) -> std::io::Result<String> {
-    let mut buffer = [0; 4096];
-    let _bytes_read = self.stdin.read(&mut buffer).await?;
-    Ok(String::from_utf8_lossy(&buffer).to_string())
+    let mut buffer = [0_u8; messages::MAX_MESSAGE_BYTES];
+    let bytes_read = self.stdin.read(&mut buffer).await?;
+    Ok(String::from_utf8_lossy(&buffer[0..bytes_read]).to_string())
   }
 
-  pub fn message_received(&mut self, message: PeerChatMessage) {
+  pub fn message_received(&mut self, message: messages::server_to_client::ChatMessage) {
     self.messages.push(Message::FromPeer {
       username: message.username,
       contents: message.contents,
-      received_at: message.received_at,
+      received_at: Utc::now(),
     });
 
     self.show_conversation();

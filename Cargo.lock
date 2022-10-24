@@ -123,7 +123,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "io_utils",
  "messages",
  "serde",
  "serde_json",
@@ -333,17 +332,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "io_utils"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "messages",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -400,6 +388,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -574,7 +563,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
- "io_utils",
  "messages",
  "serde",
  "serde_json",

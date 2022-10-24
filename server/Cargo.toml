@@ -11,7 +11,6 @@ serde = { version = "1.0.145", features = ["derive"] }
 serde_json = "1.0.86"
 tokio = { version = "1.21.2", features = ["macros", "sync"] }
 messages = { path = "../messages" }
-io_utils = { path = "../io_utils" }
 futures = "0.3.24"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"

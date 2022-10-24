@@ -1,16 +1,16 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use console::Console;
 
-use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::{TcpSocket, TcpStream};
+use tracing::{error, info};
 
 mod console;
 
 // TODO: duplicated in server/main.rs
-const SERVER_ADDR: &str = "18.228.22.102:8080";
+const SERVER_ADDR: &str = "0.0.0.0:8080";
 
 #[derive(Debug, Clone, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -32,31 +32,6 @@ struct ChatClient {
   next_message_id: u64,
 }
 
-#[derive(Debug)]
-pub enum MessageFromPeer {
-  ChatMessage(PeerChatMessage),
-  Read(PeerReadMessage),
-  Received(PeerMessageReceivedMessage),
-}
-
-#[derive(Debug)]
-pub struct PeerChatMessage {
-  message_id: u64,
-  username: String,
-  contents: String,
-  received_at: DateTime<Utc>,
-}
-
-#[derive(Debug)]
-pub struct PeerReadMessage {
-  message_id: u64,
-}
-
-#[derive(Debug)]
-pub struct PeerMessageReceivedMessage {
-  message_id: u64,
-}
-
 #[derive(Debug, Clone)]
 pub struct MessageFromClient {
   username: String,
@@ -65,14 +40,26 @@ pub struct MessageFromClient {
   sent_at: DateTime<Utc>,
 }
 
+fn try_bind_to_port(socket: &TcpSocket, port: u16) -> Result<()> {
+  for i in 0..=255 {
+    let addr = format!("127.0.0.{i}:{port}").parse()?;
+
+    if socket.bind(addr).is_ok() {
+      info!("socket bound to {:?}", &addr);
+      return Ok(());
+    }
+  }
+
+  Err(anyhow!("unable to bind socket to port. port={port}"))
+}
+
 impl ChatClient {
   async fn new(config: Config) -> Result<Self> {
     let server_stream = {
       let socket = TcpSocket::new_v4()?;
 
       if let Some(port) = config.port {
-        socket.set_reuseport(true)?;
-        socket.bind(format!("localhost:{port}").parse()?)?;
+        try_bind_to_port(&socket, port)?;
       }
 
       socket.connect(SERVER_ADDR.parse()?).await?
@@ -84,17 +71,7 @@ impl ChatClient {
       next_message_id: 0,
     };
 
-    let body = serde_json::to_vec(&messages::client_to_server::JoinRoomMessage {
-      room_id: client.config.room.clone(),
-    })?;
-
-    let mut writer = BufWriter::new(&mut client.server_stream);
-    writer
-      .write_u8(messages::MessageType::JoinRoom.as_u8())
-      .await?;
-    writer.write_u32(body.len() as u32).await?;
-    writer.write_all(&body).await?;
-    writer.flush().await?;
+    client.join_room().await?;
 
     Ok(client)
   }
@@ -117,69 +94,59 @@ impl ChatClient {
     Ok(format!("{}({})", &self.config.username, self.port()?))
   }
 
-  async fn send<M>(&mut self, message_type: messages::MessageType, message: M) -> Result<()>
-  where
-    M: serde::Serialize,
-  {
-    let body = serde_json::to_vec(&message)?;
-
-    let mut writer = BufWriter::new(&mut self.server_stream);
-
-    writer.write_u8(message_type.as_u8()).await?;
-    writer.write_u32(body.len() as u32).await?;
-    writer.write_all(&body).await?;
-    writer.flush().await?;
+  async fn send_chat_message(
+    &mut self,
+    message: messages::client_to_server::ChatMessage,
+  ) -> Result<()> {
+    messages::client_to_server::write_chat_message(&mut self.server_stream, message).await?;
 
     Ok(())
   }
 
-  async fn recv(&mut self) -> Result<Option<MessageFromPeer>> {
+  async fn join_room(&mut self) -> Result<()> {
+    let room_id = self.room().to_owned();
+
+    messages::client_to_server::write_join_room_message(
+      &mut self.server_stream,
+      messages::client_to_server::JoinRoomMessage { room_id },
+    )
+    .await?;
+
+    Ok(())
+  }
+
+  async fn mark_message_as_read(&mut self, message_id: u64, room_id: String) -> Result<()> {
+    messages::client_to_server::write_message_read(
+      &mut self.server_stream,
+      messages::client_to_server::MessageReadMessage {
+        message_id,
+        room_id,
+      },
+    )
+    .await?;
+
+    Ok(())
+  }
+
+  async fn recv(&mut self) -> Result<Option<messages::ServerToClientMessage>> {
     self.server_stream.readable().await?;
 
-    let message = io_utils::read_message(&mut self.server_stream).await?;
+    let message = messages::read_server_message(&mut self.server_stream).await?;
 
-    match message.r#type {
-      messages::MessageType::JoinRoom => unreachable!(),
-      messages::MessageType::MessageReceived => {
-        let body =
-          serde_json::from_slice::<messages::server_to_client::MessageReadMessage>(&message.body)?;
+    if let messages::ServerToClientMessage::ChatMessage(ref message) = message {
+      let room_id = self.room().to_string();
 
-        Ok(Some(MessageFromPeer::Received(
-          PeerMessageReceivedMessage {
-            message_id: body.message_id,
-          },
-        )))
-      }
-      messages::MessageType::MessageRead => {
-        let body =
-          serde_json::from_slice::<messages::server_to_client::MessageReadMessage>(&message.body)?;
-
-        Ok(Some(MessageFromPeer::Read(PeerReadMessage {
-          message_id: body.message_id,
-        })))
-      }
-      messages::MessageType::ChatMessage => {
-        let body =
-          serde_json::from_slice::<messages::server_to_client::ChatMessage>(&message.body)?;
-
-        self
-          .send(
-            messages::MessageType::MessageReceived,
-            messages::client_to_server::MessageReceivedMessage {
-              room_id: self.room().to_owned(),
-              message_id: body.message_id,
-            },
-          )
-          .await?;
-
-        Ok(Some(MessageFromPeer::ChatMessage(PeerChatMessage {
-          message_id: body.message_id,
-          username: body.username,
-          contents: body.contents,
-          received_at: Utc::now(),
-        })))
-      }
+      messages::client_to_server::write_message_received(
+        &mut self.server_stream,
+        messages::client_to_server::MessageReceivedMessage {
+          room_id,
+          message_id: message.message_id,
+        },
+      )
+      .await?;
     }
+
+    Ok(Some(message))
   }
 }
 
@@ -196,25 +163,21 @@ async fn main() -> Result<()> {
       message = client.recv() => {
         if let Ok(Some(message)) = message {
           match message {
-            MessageFromPeer::Received(PeerMessageReceivedMessage { message_id }) => {
-              console.message_delivered(message_id);
-            }
-            MessageFromPeer::Read(PeerReadMessage { message_id }) => {
-              console.message_read(message_id);
-            },
-            MessageFromPeer::ChatMessage(message) => {
+            messages::ServerToClientMessage::ChatMessage(message) => {
               let message_id = message.message_id;
               console.message_received(message);
 
-              client.send(messages::MessageType::MessageRead, messages::client_to_server::MessageReadMessage {
-                message_id,
-                room_id: client.room().to_owned()
-              })
-              .await
-              .expect("error marking message as read");
-            }
+              if let Err(err) = client.mark_message_as_read(message_id,client.room().to_owned()).await {
+                error!("unable to mark message as read. message_id={} error={:?}", message_id,err);
+              }
+            },
+            messages::ServerToClientMessage::MessageDelivered(message) => {
+              console.message_delivered(message.message_id);
+            },
+            messages::ServerToClientMessage::MessageRead(message) => {
+              console.message_read(message.message_id);
+            },
           }
-
         }
       }
       input = console.read_input() => {
@@ -232,7 +195,7 @@ async fn main() -> Result<()> {
               sent_at: Utc::now()
             };
 
-            client.send(messages::MessageType::ChatMessage, messages::client_to_server::ChatMessage {
+            client.send_chat_message( messages::client_to_server::ChatMessage {
               message_id,
               username: message.username.clone(),
               contents: message.contents.clone(),

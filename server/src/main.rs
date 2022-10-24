@@ -4,7 +4,6 @@ use tracing::error;
 use anyhow::Result;
 
 use tokio::{
-  io::{AsyncWriteExt, BufWriter},
   net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
   sync::Mutex,
 };
@@ -38,23 +37,23 @@ impl ChatManager {
     body: messages::client_to_server::ChatMessage,
   ) -> Result<()> {
     let mut rooms = self.rooms.lock().await;
+
     if let Some(clients) = rooms.get_mut(&body.room_id) {
-      let body = serde_json::to_vec(&messages::server_to_client::ChatMessage {
+      let message = messages::server_to_client::ChatMessage {
         message_id: body.message_id,
         username: body.username,
         contents: body.contents,
-      })?;
+      };
 
       let _results: Vec<std::io::Result<()>> =
         futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
           if *socket_addr != sender_addr {
-            let mut writer = BufWriter::new(write_half);
-            writer
-              .write_u8(messages::MessageType::ChatMessage.as_u8())
-              .await?;
-            writer.write_u32(body.len() as u32).await?;
-            writer.write_all(&body).await?;
-            writer.flush().await?;
+            println!(
+              "server: writing message to socket_addr={:?} message={:?}",
+              socket_addr.clone(),
+              &message
+            );
+            messages::server_to_client::write_chat_message(write_half, &message).await?;
           }
 
           Ok(())
@@ -72,20 +71,14 @@ impl ChatManager {
   ) -> Result<()> {
     let mut rooms = self.rooms.lock().await;
     if let Some(clients) = rooms.get_mut(&message.room_id) {
-      let body = serde_json::to_vec(&messages::server_to_client::MessageReadMessage {
+      let message = messages::server_to_client::MessageReadMessage {
         message_id: message.message_id,
-      })?;
+      };
 
       let _results: Vec<std::io::Result<()>> =
         futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
           if *socket_addr != sender_addr {
-            let mut writer = BufWriter::new(write_half);
-            writer
-              .write_u8(messages::MessageType::MessageRead.as_u8())
-              .await?;
-            writer.write_u32(body.len() as u32).await?;
-            writer.write_all(&body).await?;
-            writer.flush().await?;
+            messages::server_to_client::write_message_read(write_half, &message).await?;
           }
 
           Ok(())
@@ -103,20 +96,14 @@ impl ChatManager {
   ) -> Result<()> {
     let mut rooms = self.rooms.lock().await;
     if let Some(clients) = rooms.get_mut(&message.room_id) {
-      let body = serde_json::to_vec(&messages::server_to_client::MessageDeliveredMessage {
+      let message = messages::server_to_client::MessageDeliveredMessage {
         message_id: message.message_id,
-      })?;
+      };
 
       let _results: Vec<std::io::Result<()>> =
         futures::future::join_all(clients.iter_mut().map(|(socket_addr, write_half)| async {
           if *socket_addr != sender_addr {
-            let mut writer = BufWriter::new(write_half);
-            writer
-              .write_u8(messages::MessageType::MessageReceived.as_u8())
-              .await?;
-            writer.write_u32(body.len() as u32).await?;
-            writer.write_all(&body).await?;
-            writer.flush().await?;
+            messages::server_to_client::write_message_delivered(write_half, &message).await?;
           }
 
           Ok(())
@@ -157,7 +144,7 @@ async fn handle_connection(
     error!("socket is not readable. error={:?}", err);
   }
 
-  let message = match io_utils::read_message(&mut read_half).await {
+  let message = match messages::read_client_message(&mut read_half).await {
     Err(err) => {
       error!("unable to read first message from socket. error={:?}", err);
       return;
@@ -165,28 +152,24 @@ async fn handle_connection(
     Ok(v) => v,
   };
 
-  assert_eq!(message.r#type, messages::MessageType::JoinRoom);
-
-  let body =
-    match serde_json::from_slice::<messages::client_to_server::JoinRoomMessage>(&message.body) {
-      Err(err) => {
-        error!(
-          "unexpected join room message, this is a bug. error={:?}",
-          err
-        );
-        return;
-      }
-      Ok(v) => v,
-    };
-
-  chat_manager.join_room(write_half, socket_addr, body).await;
+  match message {
+    messages::ClientToServerMessage::JoinRoom(message) => {
+      chat_manager
+        .join_room(write_half, socket_addr, message)
+        .await;
+    }
+    message => panic!(
+      "expected JoinRoom message, this is a bug. message={:?}",
+      message
+    ),
+  };
 
   loop {
     if let Err(err) = read_half.readable().await {
       error!("socket is not readable. error={:?}", err);
     }
 
-    let message = match io_utils::read_message(&mut read_half).await {
+    let message = match messages::read_client_message(&mut read_half).await {
       Err(err) => {
         error!("unexpected message, this is a bug. error={:?}", err);
         return;
@@ -203,31 +186,20 @@ async fn handle_connection(
 async fn handle_message(
   chat_manager: &ChatManager,
   socket_addr: SocketAddr,
-  message: messages::Message,
+  message: messages::ClientToServerMessage,
 ) -> Result<()> {
-  match message.r#type {
-    messages::MessageType::JoinRoom => {
+  match message {
+    messages::ClientToServerMessage::JoinRoom(_message) => {
       panic!("JoinRoom message received twice, this is a bug.");
     }
-    messages::MessageType::MessageReceived => {
-      let body = serde_json::from_slice::<messages::client_to_server::MessageReceivedMessage>(
-        &message.body,
-      )?;
-
-      chat_manager.message_delivered(socket_addr, body).await?;
+    messages::ClientToServerMessage::ChatMessage(message) => {
+      chat_manager.message_received(socket_addr, message).await
     }
-    messages::MessageType::MessageRead => {
-      let body =
-        serde_json::from_slice::<messages::client_to_server::MessageReadMessage>(&message.body)?;
-
-      chat_manager.message_read(socket_addr, body).await?;
+    messages::ClientToServerMessage::MessageReceived(message) => {
+      chat_manager.message_delivered(socket_addr, message).await
     }
-    messages::MessageType::ChatMessage => {
-      let body = serde_json::from_slice::<messages::client_to_server::ChatMessage>(&message.body)?;
-
-      chat_manager.message_received(socket_addr, body).await?;
+    messages::ClientToServerMessage::MessageRead(message) => {
+      chat_manager.message_read(socket_addr, message).await
     }
   }
-
-  Ok(())
 }

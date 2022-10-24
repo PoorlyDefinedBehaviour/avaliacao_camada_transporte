@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.22"
 serde = { version = "1.0.145", features = ["derive"] }
+tokio = "1.21.2"
